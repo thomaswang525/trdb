@@ -17,7 +17,7 @@
 !hw/quartus/soc_system.qsys
 !hw/quartus/ip/**
 
-!sw/hps/*
+!sw/hps/**
 !sw/nios/application/i2c/*
 !sw/nios/application/cmos_sensor_output_generator/*
 !sw/nios/application/*.c
