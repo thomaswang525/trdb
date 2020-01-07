@@ -16,6 +16,7 @@
 !hw/quartus/ES_mini_project.sdc
 !hw/quartus/soc_system.qsys
 !hw/quartus/ip/**
+!hw/quartus/soc_system/**
 
 !sw/hps/**
 !sw/nios/application/i2c/*

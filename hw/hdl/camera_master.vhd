@@ -102,8 +102,8 @@ begin
     -- idle_1: start of odd-numbered rows.
     -- b1:     blue color of pixel1.
     -- g1:     green2 color of pixel1.
-    -- b1:     blue color of pixel2.
-    -- g1:     green2 color of pixel2.
+    -- b2:     blue color of pixel2.
+    -- g2:     green2 color of pixel2.
     read_state_fsm : process(read_state, linevalid, framevalid, trigger, status, color, f0_data, pixel)
     begin
 
