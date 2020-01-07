@@ -5,7 +5,7 @@
   Revision          : 0.1
   Modification Date : 07/01/2020
 
-  This file contains the main function of the TRDB-D5M NIOS2 process.
+  This file contains the principal functions of the TRDB-D5M NIOS2 process.
 ******************************************************************************/
 
 #include <stdio.h>
@@ -15,13 +15,13 @@
 #include "io.h"
 
 #include "i2c/i2c.h"
-#include "i2c/i2c.c"
+#include "i2c/i2c.c" // for some reason it has to be included?!
 
 #include "trdb_d5m.h"
 
 /** Programmable interface register offsets. */
 #define PI_WIDTH       (4)
-#define PI_REG_RESET   (0*PI_WIDTH)
+#define PI_REG_RESET   (0*PI_WIDTH) // DEPRECATED
 #define PI_REG_ADDRESS (1*PI_WIDTH)
 #define PI_REG_SIZE    (2*PI_WIDTH)
 #define PI_REG_READY   (3*PI_WIDTH)
@@ -55,7 +55,7 @@ void ppm_dump(uint32_t offset, char *filename) {
 
           fwrite(color, 1, 3, fp);
 
-          offset += 2;
+          offset += 2; // increase by two bytes
       }
   }
   fclose(fp);
@@ -119,8 +119,8 @@ void api_init(uint32_t addr) {
 void trigger_sensor(i2c_dev *i2c) {
 	IOWR_32DIRECT(CAMERA_MODULE_0_BASE, PI_REG_TRIGGER, 0x0);
 
-	// The trigger pin of the TRDB-D5M does not work correctly, hence
-	// this is a *ugly* through the trigger register.
+	// The trigger pin of the TRDB-D5M does not work correctly, hence
+	// this is a *ugly* hack by using the trigger register.
 	trdb_write_part(i2c, TRDB_D5M_I2C_REG_TRIGGER, TRDB_D5M_I2C_TRIGGER, TRDB_D5M_I2C_TRIGGER_MASK);
 	trdb_write_part(i2c, TRDB_D5M_I2C_REG_TRIGGER, 0x0, TRDB_D5M_I2C_TRIGGER_MASK);
 

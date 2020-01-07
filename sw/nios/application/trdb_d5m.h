@@ -83,10 +83,10 @@
 bool trdb_write(i2c_dev *i2c, uint8_t register_offset, uint16_t data);
 /** Write a partial, masked value to a register. */
 bool trdb_write_part(i2c_dev *i2c, uint8_t register_offset, uint16_t data, uint16_t mask);
-/** Read a full 16 bits from a register. */
+/** Read a full 16 bits from a register. */
 bool trdb_read(i2c_dev *i2c, uint8_t register_offset, uint16_t *data);
 
-/** Reset all the registers. */
+/** Reset all the registers. */
 void trdb_reset(i2c_dev *i2c);
 
 /** Configure the registers with the values above. */

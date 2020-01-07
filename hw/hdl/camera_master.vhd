@@ -13,14 +13,19 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
+-- The master unit takes care of parsing the raw pixel data that
+-- stems from the camera sensor and convert it into a 320x240 565-RGB
+-- image in memory.
 entity camera_master is
     port(clk     : in std_logic;
          n_reset : in std_logic;
 
+         -- TRDB-D5M signals.
          pixel      : in std_logic_vector(11 downto 0);
          linevalid  : in std_logic;
          framevalid : in std_logic;
 
+         -- Avalon bus signals
          waitrequest : in  std_logic;
          write       : out std_logic;
          data        : out std_logic_vector(31 downto 0);
@@ -28,6 +33,7 @@ entity camera_master is
          byteenable  : out std_logic_vector(3 downto 0);
          burstcount  : out std_logic_vector(3 downto 0);
 
+         -- Slave registers (programmable interface)
          base    : in  std_logic_vector(31 downto 0);
          size    : in  std_logic_vector(31 downto 0);
          trigger : in  std_logic;
@@ -76,10 +82,6 @@ architecture behaviour of camera_master is
 
 begin
 
-    --byteenable <= "1111";
-    --burstcount <= "0100";
-    --address    <= location;
-
     ready <= status;
 
     read_state_reg : process(clk, n_reset)
@@ -91,6 +93,17 @@ begin
         end if;
     end process read_state_reg;
 
+    -- The read finit-state machine handles the parsing, buffering
+    -- and conversion of the raw pixel data.
+    --
+    -- start:  inactive state before and after capture of a frame.
+    -- idle_0: when triggered upon a new capture, or start of even-numbered rows.
+    -- rg:     even-numbered rows (green1, red).
+    -- idle_1: start of odd-numbered rows.
+    -- b1:     blue color of pixel1.
+    -- g1:     green2 color of pixel1.
+    -- b1:     blue color of pixel2.
+    -- g1:     green2 color of pixel2.
     read_state_fsm : process(read_state, linevalid, framevalid, trigger, status, color, f0_data, pixel)
     begin
 
@@ -114,24 +127,24 @@ begin
 
             when idle_0 =>
                 read_state_next <= idle_0;
-                if status = '1' then
+                if status = '1' then -- frame has been completed.
                     read_state_next <= start;
-                elsif linevalid = '1' and framevalid = '1' then
+                elsif linevalid = '1' and framevalid = '1' then -- start of a new line
                     read_state_next <= rg;
                     f0_writerequest <= '1';
                 end if;
 
             when rg =>
                 read_state_next <= rg;
-                f0_writerequest <= '1';
-                if linevalid = '0' then
+                f0_writerequest <= '1'; -- buffer row in fifo_0
+                if linevalid = '0' then -- line end
                     read_state_next <= idle_1;
                     f0_writerequest <= '0';
                 end if;
 
             when idle_1 =>
                 read_state_next <= idle_1;
-                if linevalid = '1' and framevalid = '1' then
+                if linevalid = '1' and framevalid = '1' then -- new of a new line
                     read_state_next <= g1;
                     update_color    <= '1';
                     f0_readrequest  <= '1';
@@ -140,7 +153,7 @@ begin
 
             when b1 =>
                 if linevalid = '0' then
-                    read_state_next <= idle_0;
+                    read_state_next <= idle_0; -- line end
                 else
                     update_color    <= '1';
                     read_state_next <= g1;
@@ -165,7 +178,9 @@ begin
         end case;
     end process read_state_fsm;
 
-    color_mux : process(stage_color, color, pixel, f0_data)
+    -- Pixel conversion unit convert 8 12-bit color pixels to
+    -- two 565-RGB pixels that will be stored in memory.
+    color_alu : process(stage_color, color, pixel, f0_data)
         variable b, r                         : std_logic_vector(4 downto 0);
         variable g1, g2                       : std_logic_vector(11 downto 0);
         variable g1g2a, g1g2b                 : std_logic_vector(5 downto 0);
@@ -179,6 +194,7 @@ begin
 
         -- Calculate (g1 + g2)/2 for pixel 1 (g1g2a) and pixel 2 (g1g2b). This
         -- may overflow hence the resize to 13 bits.
+        -- Note that extracting the most significant bits may not be the best solution.
         g1g2a_tmp_res := resize(unsigned(color(16 downto 5)), 13) + resize(unsigned(g2), 13);
         g1g2a_tmp     := std_logic_vector(g1g2a_tmp_res(12 downto 1));
         g1g2a         := g1g2a_tmp(11 downto 6);
@@ -187,6 +203,7 @@ begin
         g1g2b_tmp     := std_logic_vector(g1g2b_tmp_res(12 downto 1));
         g1g2b         := g1g2b_tmp(11 downto 6);
 
+        -- The creation of two pixels happens in four cycles.
         case stage_color is
             when "000"  => new_color <= "000000000000000" & g1 & b;
             when "001"  => new_color <= "0000000000000000" & r & g1g2a & color(4 downto 0);
@@ -194,7 +211,7 @@ begin
             when "011"  => new_color <= r & g1g2b & color(20 downto 0);
             when others => new_color <= (others => '0');
         end case;
-    end process color_mux;
+    end process color_alu;
 
     store_state_reg : process(clk, n_reset)
     begin
@@ -205,6 +222,10 @@ begin
         end if;
     end process store_state_reg;
 
+    -- The store finite-state machine takes care of passing the converted
+    -- pixels to memory by accessing the Avalon bus. It operates
+    -- with burst writes that are triggered once fifo_1 has reached
+    -- a certain number of elements.
     store_state_fsm : process(store_state, f1_almostfull, waitrequest, burst)
     begin
 
@@ -223,7 +244,7 @@ begin
         case store_state is
             when idle =>
                 store_state_next <= idle;
-                if f1_almostfull = '1' then
+                if f1_almostfull = '1' then -- fifo_1 trigger
                     store_state_next <= trans;
                 end if;
 
@@ -238,6 +259,7 @@ begin
                     reset_burst      <= '1';
                     inc_location     <= '1';
                 end if;
+                -- only update registers if write can take place
                 if waitrequest = '0' then
                     dec_burst      <= '1';
                     f1_readrequest <= '1';
@@ -246,6 +268,8 @@ begin
         end case;
     end process store_state_fsm;
 
+    -- The location register store the memory address where
+    -- the next 2-pixel entry is written to.
     location_reg : process(clk, n_reset)
     begin
         if n_reset = '0' then
@@ -259,6 +283,8 @@ begin
         end if;
     end process location_reg;
 
+    -- The burst register stores the remaining bursts
+    -- until the limit has been reached.
     burst_reg : process(clk, n_reset)
     begin
         if n_reset = '0' then
@@ -272,6 +298,8 @@ begin
         end if;
     end process burst_reg;
 
+    -- The color registers keeps the current 32-bit, two-pixel
+    -- entry that is being built during the b1, g1, b2, g2 read FSM states.
     color_reg : process(clk, n_reset)
     begin
         if n_reset = '0' then
@@ -283,6 +311,8 @@ begin
         end if;
     end process color_reg;
 
+    -- The count registers keeps track of how many pixels
+    -- have already been written to memory.
     count_reg : process(clk, n_reset)
     begin
         if n_reset = '0' then
@@ -296,6 +326,8 @@ begin
         end if;
     end process count_reg;
 
+    -- The status register indicates whether all the pixels
+    -- of a frame have been written to memory.
     status_reg : process(clk, n_reset)
     begin
         if n_reset = '0' then
@@ -309,6 +341,8 @@ begin
         end if;
     end process status_reg;
 
+    -- debug register to count the number of raw pixels
+    -- the come from the sensor.
     pc_reg : process(clk, n_reset)
     begin
         if n_reset = '0' then
@@ -320,6 +354,7 @@ begin
         end if;
     end process pc_reg;
 
+    -- FIFO instantiations.
     f0 : entity work.fifo_0
         port map(clock => clk,
                  data  => pixel,
